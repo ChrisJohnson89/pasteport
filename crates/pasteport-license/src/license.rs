@@ -136,7 +136,12 @@ fn normalize(raw: &str) -> String {
     raw.chars().filter(|c| !c.is_whitespace()).collect()
 }
 
-/// Encode a signed key from its parts. Used by the minting tool and by tests.
+/// Encode a signed key from its parts.
+///
+/// Only the minting side ever assembles a key; verification takes one apart. So
+/// this is gated on the `mint` feature, which also keeps a default-feature
+/// release build free of dead code.
+#[cfg(feature = "mint")]
 pub fn encode_key(payload_bytes: &[u8], signature: &[u8; 64]) -> String {
     format!(
         "{KEY_PREFIX}.{}.{}",
