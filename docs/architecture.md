@@ -10,16 +10,16 @@ gone the other way, the tradeoff is written down.
                     │  pasteport-core  │   clips, SQLite, search, retention
                     └────────┬─────────┘   no platform code, no I/O policy
                              │
-        ┌────────────────────┼────────────────────┐
-        │                    │                    │
-┌───────▼─────────┐ ┌────────▼────────┐ ┌─────────▼────────┐
-│ pasteport-      │ │ pasteport-      │ │ pasteport-daemon │
-│ clipboard       │ │ license         │ │                  │
-│                 │ │                 │ │ watcher thread   │
-│ NSPasteboard    │ │ Ed25519 verify  │ │ Unix socket API  │
-│ wl-clipboard    │ │ trial clock     │ │                  │
-│ xclip / xsel    │ │                 │ │                  │
-└─────────────────┘ └─────────────────┘ └────────┬─────────┘
+        ┌────────────────────┴────────────────────┐
+        │                                         │
+┌───────▼─────────┐                     ┌─────────▼────────┐
+│ pasteport-      │                     │ pasteport-daemon │
+│ clipboard       │                     │                  │
+│                 │                     │ watcher thread   │
+│ NSPasteboard    │                     │ Unix socket API  │
+│ wl-clipboard    │                     │                  │
+│ xclip / xsel    │                     │                  │
+└─────────────────┘                     └────────┬─────────┘
                                                  │ newline-delimited JSON
                          ┌───────────────────────┼───────────────────────┐
                          │                       │                       │
@@ -152,21 +152,16 @@ Pinned clips and pinboard members are excluded from every prune path — age,
 count, and `clear` without `--all`. If a user marked something as worth keeping,
 no automatic policy overrides that.
 
-### Licensing is verification-only in shipped builds
+### There is no licensing code
 
-Key signing lives behind the non-default `mint` feature. A release binary
-contains no signing code, so a leaked binary cannot be turned into a key
-generator.
+Pasteport is free, so there is no entitlement check anywhere in the request path.
+This is worth stating in an architecture document because an earlier revision did
+have one — an Ed25519 offline verifier with a trial clock — and it was deleted
+rather than defaulted to permissive.
 
-The verifying public key is baked in at build time via
-`option_env!("PASTEPORT_LICENSE_PUBKEY")`. When it is absent — which is what
-happens when a contributor runs `cargo build` — licensing reports
-`Status::SelfBuilt` and the app is fully functional.
-
-That last part is a deliberate product decision, not an oversight. The code is
-AGPL. Anyone can compile it. Shipping a source tree that builds into a crippled
-binary would inconvenience contributors and stop nobody. The paid artifact is
-the signed, notarized build.
+That distinction matters. A disabled check is a check somebody re-enables by
+flipping a constant. `Service::handle` now dispatches every request with no
+preamble, and there is no crate, no key, and no trial file to reintroduce.
 
 ## Threading
 
@@ -174,7 +169,7 @@ Three threads in the daemon:
 
 | Thread | Job |
 |---|---|
-| main | `accept()` loop, one request at a time |
+| main | `accept()` loop, one thread per connection |
 | `pasteport-watcher` | polls the clipboard, ingests clips |
 | `pasteport-signals` | watches for `SIGINT`/`SIGTERM`, unblocks `accept()` |
 
@@ -201,7 +196,7 @@ wake the accept loop.
 
 Tests live next to what they test. Three groups:
 
-1. **Unit** — kind inference, dedup digests, the trial clock, byte formatting.
+1. **Unit** — kind inference, dedup digests, retention policy, byte formatting.
 2. **Integration through a real socket** — `server.rs` spawns a daemon on a temp
    socket and drives it with a real client, including malformed input, stale
    socket recovery, and the refusal to steal a live socket.
@@ -216,8 +211,6 @@ error and does **not** mark the clip as used.
 
 ## Known limitations
 
-- **No global hotkey yet.** The pieces that need it are the GUI layers, which
-  are not finished.
 - **No source app on Linux.** There is no portable way to ask who owns the
   focused window. `source_app` is `None` there, so the ignore list falls back to
   the concealed-type markers, which KeePassXC and friends do set.
@@ -226,5 +219,6 @@ error and does **not** mark the clip as used.
 - **History is not encrypted at rest.** It is `0600` in the user's data
   directory, which matches how a browser stores its history, but full-disk
   encryption is doing the real work. SQLCipher is on the roadmap.
-- **The trial timer is trivially resettable.** By design. See
-  [licensing.md](licensing.md).
+- **No global hotkey yet.** The macOS app opens from the menu bar or the dock;
+  summoning it with a keystroke needs `RegisterEventHotKey` and an Accessibility
+  permission flow.

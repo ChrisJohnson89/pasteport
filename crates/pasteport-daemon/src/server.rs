@@ -253,7 +253,6 @@ mod tests {
     use super::*;
     use pasteport_clipboard::{ClipboardBackend, Payload, Result as ClipResult};
     use pasteport_core::{Config, NewClip, Store};
-    use pasteport_license::Licensing;
     use std::sync::Mutex;
 
     #[derive(Debug, Default)]
@@ -291,7 +290,6 @@ mod tests {
         let service = Arc::new(Service::new(
             store,
             Config::default(),
-            Licensing::unconfigured(),
             Box::new(NullClipboard),
             dir.path().to_path_buf(),
         ));

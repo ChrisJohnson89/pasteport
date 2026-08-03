@@ -13,9 +13,51 @@ pub fn data_dir() -> Result<PathBuf> {
     if let Some(dir) = std::env::var_os("PASTEPORT_DATA_DIR") {
         return Ok(PathBuf::from(dir));
     }
-    let dirs =
-        directories::ProjectDirs::from("com", "pasteport", "Pasteport").ok_or(Error::NoDataDir)?;
-    Ok(dirs.data_dir().to_path_buf())
+    let base = directories::BaseDirs::new().ok_or(Error::NoDataDir)?;
+
+    // `BaseDirs::data_dir()` is `~/Library/Application Support` on macOS and
+    // `$XDG_DATA_HOME` (default `~/.local/share`) on Linux, so one join covers
+    // both. The leaf differs because the platform conventions differ: title case
+    // on macOS, lowercase on Linux.
+    //
+    // Deliberately not `ProjectDirs::from("com", "pasteport", …)`, which yields
+    // `~/Library/Application Support/com.pasteport.Pasteport`. That is a legal
+    // location but an unfriendly one to tell somebody to open in Finder.
+    let leaf = if cfg!(target_os = "macos") {
+        "Pasteport"
+    } else {
+        "pasteport"
+    };
+    let dir = base.data_dir().join(leaf);
+
+    migrate_legacy_dir(&dir, base.data_dir());
+    Ok(dir)
+}
+
+/// Move a pre-0.1 data directory to the current location, once.
+///
+/// 0.1.0 development builds used the reverse-DNS name that `ProjectDirs`
+/// produces. Anyone who ran one of those has a history there, and silently
+/// starting from an empty database would look like data loss. Only renames when
+/// the new location does not exist yet, so it can never clobber anything.
+///
+/// Delete this after 0.1 ships; it exists for a window of a few days.
+fn migrate_legacy_dir(current: &std::path::Path, base: &std::path::Path) {
+    if current.exists() {
+        return;
+    }
+    let legacy = base.join("com.pasteport.Pasteport");
+    if !legacy.is_dir() {
+        return;
+    }
+    match std::fs::rename(&legacy, current) {
+        Ok(()) => tracing::info!(
+            from = %legacy.display(), to = %current.display(),
+            "moved clipboard history to its current location"
+        ),
+        // Not fatal: the caller creates a fresh directory and carries on.
+        Err(e) => tracing::warn!(error = %e, "could not move the legacy data directory"),
+    }
 }
 
 pub fn database_path() -> Result<PathBuf> {
@@ -24,10 +66,6 @@ pub fn database_path() -> Result<PathBuf> {
 
 pub fn config_path() -> Result<PathBuf> {
     Ok(data_dir()?.join("config.toml"))
-}
-
-pub fn license_path() -> Result<PathBuf> {
-    Ok(data_dir()?.join("license.key"))
 }
 
 /// Unix domain socket paths are bounded by `sun_path`: 104 bytes on macOS and
@@ -261,12 +299,68 @@ mod tests {
     }
 
     #[test]
+    fn default_data_dir_is_the_friendly_platform_path() {
+        let lock = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let previous = std::env::var_os("PASTEPORT_DATA_DIR");
+        std::env::remove_var("PASTEPORT_DATA_DIR");
+
+        let dir = data_dir().unwrap();
+        if cfg!(target_os = "macos") {
+            assert!(
+                dir.ends_with("Library/Application Support/Pasteport"),
+                "expected the documented macOS path, got {}",
+                dir.display()
+            );
+        } else {
+            assert!(dir.ends_with("pasteport"), "got {}", dir.display());
+        }
+        // The reverse-DNS name ProjectDirs would have produced is not it.
+        assert!(!dir.to_string_lossy().contains("com.pasteport"));
+
+        match previous {
+            Some(v) => std::env::set_var("PASTEPORT_DATA_DIR", v),
+            None => std::env::remove_var("PASTEPORT_DATA_DIR"),
+        }
+        drop(lock);
+    }
+
+    #[test]
+    fn legacy_directory_is_adopted_but_never_clobbers() {
+        let tmp = tempfile::tempdir().unwrap();
+        let base = tmp.path();
+        let current = base.join("Pasteport");
+        let legacy = base.join("com.pasteport.Pasteport");
+
+        // A legacy dir with no current one is moved across.
+        std::fs::create_dir_all(&legacy).unwrap();
+        std::fs::write(legacy.join("history.sqlite3"), b"old").unwrap();
+        migrate_legacy_dir(&current, base);
+        assert!(
+            current.join("history.sqlite3").exists(),
+            "history should have moved"
+        );
+        assert!(!legacy.exists());
+
+        // With both present, the current one wins and the legacy is left alone.
+        std::fs::create_dir_all(&legacy).unwrap();
+        std::fs::write(legacy.join("history.sqlite3"), b"stale").unwrap();
+        migrate_legacy_dir(&current, base);
+        assert_eq!(
+            std::fs::read(current.join("history.sqlite3")).unwrap(),
+            b"old"
+        );
+        assert!(
+            legacy.exists(),
+            "an existing current dir must not be replaced"
+        );
+    }
+
+    #[test]
     fn derived_paths_all_live_under_the_data_dir() {
         let dir = std::path::Path::new("/tmp/pp-derived");
         let _guard = DataDirGuard::set(dir);
 
         assert_eq!(database_path().unwrap(), dir.join("history.sqlite3"));
         assert_eq!(config_path().unwrap(), dir.join("config.toml"));
-        assert_eq!(license_path().unwrap(), dir.join("license.key"));
     }
 }

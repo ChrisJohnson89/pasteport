@@ -2,17 +2,18 @@
 
 [![CI](https://github.com/ChrisJohnson89/pasteport/actions/workflows/ci.yml/badge.svg)](https://github.com/ChrisJohnson89/pasteport/actions/workflows/ci.yml)
 [![License: AGPL v3](https://img.shields.io/badge/license-AGPL--3.0-blue.svg)](LICENSE)
+[![Free](https://img.shields.io/badge/price-free-brightgreen.svg)](#free-and-open-source)
 
-Clipboard history for macOS and Linux. Local-first, no account, no sync server,
-no telemetry.
+**Free** clipboard history for macOS and Linux. Local-first, no account, no sync
+server, no telemetry, no paid tier.
 
 Pasteport remembers what you copy, lets you search it, and puts it back on the
 clipboard when you need it. The engine is a small Rust core; the interface is
 native on each platform.
 
-> **Status: 0.1.0, early.** The engine, daemon, and CLI are built and tested.
-> The two GUI layers are scaffolded and not yet shippable. See
-> [Roadmap](#roadmap).
+> **Status: 0.1.0, early.** There is a working macOS app you can double-click,
+> plus a daemon and CLI. The GTK4 front end for Linux builds but has had less
+> use. No global hotkey yet. See [Roadmap](#roadmap).
 
 ## Why another clipboard manager
 
@@ -25,8 +26,8 @@ everything else:
                       |
     +-----------------+-----------------+
     |                 |                 |
-pasteport-clipboard   pasteport-license  pasteport-daemon
- NSPasteboard /        Ed25519, offline   watcher + Unix socket API
+pasteport-clipboard                      pasteport-daemon
+ NSPasteboard /                          watcher + Unix socket API
  wl-clipboard / xclip                          |
                                     +----------+----------+
                                     |          |          |
@@ -59,20 +60,49 @@ does about that:
 |---|---|
 | Password managers | 1Password, Bitwarden, KeePassXC and others are on the ignore list by default |
 | `org.nspasteboard.ConcealedType` | Honoured. Concealed items are detected **before** the payload is read, so a password never enters the process |
-| File permissions | Data dir `0700`; database, WAL, config, license, and socket all `0600` |
+| File permissions | Data dir `0700`; database, WAL, config, and socket all `0600` |
 | Temp files | `PRAGMA temp_store = MEMORY`, so SQLite never spills clip contents outside our own files |
 | Network | There is no network code. No sync, no crash reporting, no update check |
 | Deleted clips | Removed from the search index too, via FTS triggers |
 
 ## Install
 
-### From source
+### macOS app
 
-Needs Rust 1.82 or newer.
+Builds `Pasteport.app` and puts it in `/Applications`, ready to double-click:
 
 ```bash
 git clone https://github.com/ChrisJohnson89/pasteport
-cd pasteport
+```
+
+```bash
+cd pasteport && ./apps/macos/build-app.sh --install
+```
+
+Then open it from Applications, or:
+
+```bash
+open -a Pasteport
+```
+
+The app is self-contained. It ships the background service inside its own bundle
+and starts it on launch, so there is nothing else to install and nothing to run
+in a terminal. Quitting the app stops the service again.
+
+Uninstalling is dragging the app to the trash — no LaunchAgent plist, no
+receipts, nothing installed outside the bundle. History lives in
+`~/Library/Application Support/Pasteport/` if you want that gone too.
+
+Needs Rust 1.82+, Xcode command line tools, and macOS 14 or newer.
+
+> The build is signed ad-hoc rather than with a Developer ID, because it is built
+> on your own machine. A signed and notarized download is on the roadmap.
+
+### CLI and service only
+
+For Linux, or if you only want the terminal side:
+
+```bash
 cargo build --release
 ```
 
@@ -91,11 +121,18 @@ Pasteport picks `wl-clipboard` under Wayland and `xclip` (or `xsel`) under X11.
 
 ## Use
 
-Start the service, then talk to it:
+### The app
 
-```bash
-pasteportd &
-```
+Double-click Pasteport. A window opens with a search field and your history; the
+same panel is on the menu bar icon. Type to filter, Return to copy the highlighted
+clip back to the clipboard, right-click for pin and delete.
+
+The window refreshes itself, so new clips appear as you copy them.
+
+### The CLI
+
+The app's service and the CLI talk to the same database, so these work whether
+you started the app or ran `pasteportd` yourself:
 
 ```bash
 pasteport list
@@ -122,9 +159,8 @@ Full command list:
 | `pasteport clear [--all]` | Delete history; asks first |
 | `pasteport capture` | Store the clipboard right now |
 | `pasteport prune` | Apply retention immediately |
-| `pasteport status` | Daemon, license, and history stats |
+| `pasteport status` | Daemon and history stats |
 | `pasteport board ...` | Manage pinboards |
-| `pasteport license ...` | Install or remove a license key |
 
 Add `--json` to any command for machine-readable output. Exit status is non-zero
 on failure, in both modes.
@@ -153,27 +189,18 @@ pasteportd --data-dir /tmp/pp-test --log debug
 
 `pasteportd --private` keeps history in memory only and writes nothing to disk.
 
-## Licensing and the source
+## Free and open source
 
-Pasteport is **paid software with an open codebase**, which needs saying plainly
-because the combination confuses people:
+Pasteport is free. Not freemium, not trial-then-pay, not free-with-a-pro-tier:
 
-- The **source is AGPL-3.0**. Read it, audit it, patch it, run it.
-- A **build you compile yourself is fully functional.** No feature gates, no
-  crippled mode. `pasteport status` will call it a source build.
-- The **paid product** is the signed and notarized binary, the installer, and
-  support. That is what a license key unlocks.
-- License keys are **Ed25519 signatures verified offline**. Nothing phones home,
-  ever.
-- The trial is 14 days and is a **courtesy timer, not DRM**. Delete the file and
-  you get another 14 days. Locking that down would cost honest users more than
-  it would recover.
+- **No payment, ever.** There is no license key, no trial timer, no entitlement
+  check. The code that used to enforce one has been deleted, not disabled.
+- **No account.** Nothing to sign up for.
+- **No telemetry.** There is no network code in the product at all — no sync, no
+  crash reporting, no update check. You can verify that by grepping for it.
+- **AGPL-3.0.** Read it, patch it, fork it, ship your own build.
 
-Signing code lives behind a non-default `mint` feature, so distributed binaries
-cannot mint keys even in principle.
-
-See [docs/licensing.md](docs/licensing.md) for the key format and the release
-signing process.
+If you find it useful, a star on the repo is plenty.
 
 ## Development
 
@@ -198,7 +225,6 @@ Layout:
 |---|---|
 | `pasteport-core` | Clips, SQLite store, search, retention. No platform code |
 | `pasteport-clipboard` | `ClipboardBackend` trait plus macOS and Linux implementations |
-| `pasteport-license` | Offline key verification, trial handling |
 | `pasteport-daemon` | Watcher, Unix socket server, `pasteportd` |
 | `pasteport-cli` | The `pasteport` command |
 | `pasteport-ffi` | C ABI so the SwiftUI app can reuse the engine |
@@ -215,13 +241,14 @@ Done:
 - [x] macOS `NSPasteboard` backend with concealed-type handling
 - [x] Linux Wayland and X11 backends
 - [x] Daemon, Unix socket protocol, CLI
-- [x] Offline license verification
+- [x] Double-clickable macOS app: window plus a menu bar item, self-starting service
+- [x] Generated app icon, no binary blobs in the repo
 
 Next:
 
-- [ ] SwiftUI menu bar app: global hotkey, search palette, paste-on-select
-- [ ] GTK4 window with the same interaction model
-- [ ] Global hotkey capture on both platforms
+- [ ] Global hotkey on both platforms, and paste-on-select
+- [ ] Signed and notarized releases, plus a DMG
+- [ ] Image previews in the list
 - [ ] Encrypted-at-rest option (SQLCipher)
 - [ ] Signed release builds and installers
 

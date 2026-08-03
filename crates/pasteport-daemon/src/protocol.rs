@@ -20,7 +20,7 @@ use pasteport_core::{Clip, ClipKind, Pinboard, Stats};
 pub enum Request {
     /// Liveness check.
     Ping,
-    /// Version, backend, license state, and history statistics.
+    /// Version, backend, and history statistics.
     Status,
     /// Recent clips, newest first, pinned floated to the top.
     List {
@@ -83,12 +83,6 @@ pub enum Request {
         #[serde(default = "default_limit")]
         limit: usize,
     },
-    /// Install a license key.
-    LicenseInstall {
-        key: String,
-    },
-    /// Forget the installed license.
-    LicenseRemove,
     /// Ask the daemon to exit cleanly.
     Shutdown,
 }
@@ -149,12 +143,6 @@ pub struct StatusReport {
     pub backend: String,
     pub uptime_secs: u64,
     pub poll_interval_ms: u64,
-    /// Human-readable license state.
-    pub license: String,
-    /// Whether the app is entitled to run its full feature set.
-    pub licensed: bool,
-    /// Whether the user should be prompted about licensing.
-    pub license_needs_attention: bool,
     pub stats: Stats,
     pub data_dir: String,
 }
@@ -220,10 +208,6 @@ mod tests {
                 name: "work".into(),
                 limit: 20,
             },
-            Request::LicenseInstall {
-                key: "PP1.a.b".into(),
-            },
-            Request::LicenseRemove,
             Request::Shutdown,
         ] {
             round_trip(&req);

@@ -30,6 +30,33 @@ struct HistoryView: View {
             footer
         }
         .onAppear { searchFocused = true }
+        // Poll while this view is on screen.
+        //
+        // The daemon captures clips whether or not a window is open, so a view
+        // that loaded once shows a history that is stale the moment the user
+        // copies anything — which was exactly the first bug this app had: an
+        // empty list and "0 clips" while three clips sat in the database.
+        //
+        // A push notification on the socket would be tidier, and is the right
+        // answer eventually. A 1.5s poll of a local Unix socket costs microseconds
+        // and needs no protocol change, so it is the right answer now.
+        //
+        // This `.task` is cancelled automatically when the view disappears, so a
+        // closed menu bar panel polls nothing.
+        .task {
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .milliseconds(1500))
+                if Task.isCancelled { break }
+                await model.refreshIfIdle()
+            }
+        }
+        // Refresh immediately on activation too: waiting up to 1.5s after
+        // clicking the menu bar icon reads as lag.
+        .onReceive(NotificationCenter.default.publisher(
+            for: NSApplication.didBecomeActiveNotification
+        )) { _ in
+            Task { await model.refreshIfIdle() }
+        }
     }
 
     // MARK: Search
@@ -114,8 +141,10 @@ struct HistoryView: View {
                 .multilineTextAlignment(.center)
                 .foregroundStyle(.secondary)
                 .textSelection(.enabled)
+            // start(), not refresh(): retrying has to be able to launch the
+            // service, which is the thing that is usually wrong.
             Button("Try Again") {
-                Task { await model.refresh() }
+                Task { await model.start() }
             }
         }
         .padding(24)
@@ -129,12 +158,6 @@ struct HistoryView: View {
             if let status = model.status {
                 Text("\(status.stats.totalClips) clips")
                     .foregroundStyle(.secondary)
-                if status.licenseNeedsAttention {
-                    Text("·")
-                        .foregroundStyle(.tertiary)
-                    Text(status.license)
-                        .foregroundStyle(.orange)
-                }
             } else {
                 Text("Service not running")
                     .foregroundStyle(.orange)
@@ -215,8 +238,6 @@ struct ClipRow: View {
 
 struct SettingsView: View {
     @ObservedObject var model: HistoryModel
-    @State private var licenseKey = ""
-    @State private var installMessage: String?
 
     var body: some View {
         Form {
@@ -232,35 +253,6 @@ struct SettingsView: View {
                 } else {
                     Text("The Pasteport service is not running. Start it with `pasteportd`.")
                         .foregroundStyle(.secondary)
-                }
-            }
-
-            Section("License") {
-                LabeledContent("Status", value: model.status?.license ?? "Unknown")
-
-                if model.status?.licensed != true || model.status?.licenseNeedsAttention == true {
-                    TextField("Paste your license key", text: $licenseKey, axis: .vertical)
-                        .lineLimit(2...4)
-                        .font(.system(.body, design: .monospaced))
-
-                    HStack {
-                        Button("Install Key") {
-                            Task {
-                                let ok = await model.installLicense(key: licenseKey)
-                                installMessage = ok
-                                    ? "License installed."
-                                    : model.errorMessage ?? "Could not install that key."
-                                if ok { licenseKey = "" }
-                            }
-                        }
-                        .disabled(licenseKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-
-                        if let installMessage {
-                            Text(installMessage)
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-                    }
                 }
             }
 

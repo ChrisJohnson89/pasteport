@@ -19,7 +19,6 @@ path = "src/main.rs"
 [dependencies]
 pasteport-core.workspace = true
 pasteport-clipboard.workspace = true
-pasteport-license.workspace = true
 
 anyhow.workspace = true
 base64.workspace = true

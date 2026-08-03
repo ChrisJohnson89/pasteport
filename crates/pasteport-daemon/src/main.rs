@@ -8,7 +8,6 @@ use clap::Parser;
 
 use pasteport_core::{paths, Config, Store};
 use pasteport_daemon::{server, service::Service, spawn_watcher};
-use pasteport_license::Licensing;
 
 #[derive(Debug, Parser)]
 #[command(
@@ -19,7 +18,7 @@ use pasteport_license::Licensing;
                   a Unix-socket API to the Pasteport apps and CLI."
 )]
 struct Args {
-    /// Override the data directory (database, config, license, socket).
+    /// Override the data directory (database, config, socket).
     #[arg(long, value_name = "DIR")]
     data_dir: Option<PathBuf>,
 
@@ -84,15 +83,6 @@ fn main() -> anyhow::Result<()> {
         pasteport_daemon::open_store(&paths::database_path()?)?
     };
 
-    let licensing = Licensing::new(&data_dir);
-    let status = licensing.status();
-    tracing::info!(license = %status.summary(), "licensing");
-    if !status.is_functional() {
-        // Still start up: the CLI and UI need a reachable daemon to install a
-        // key and to explain what is wrong.
-        tracing::warn!("Pasteport is not licensed; capture is paused until a key is installed");
-    }
-
     // Two independent clipboard handles: one for the watcher, one for writes.
     let watch_backend = pasteport_clipboard::default_backend()
         .context("no clipboard backend available on this system")?;
@@ -100,13 +90,7 @@ fn main() -> anyhow::Result<()> {
         .context("no clipboard backend available on this system")?;
     tracing::info!(backend = watch_backend.name(), "clipboard backend");
 
-    let service = Arc::new(Service::new(
-        store,
-        config,
-        licensing,
-        write_backend,
-        data_dir.clone(),
-    ));
+    let service = Arc::new(Service::new(store, config, write_backend, data_dir.clone()));
 
     if args.capture_on_start {
         match service.handle(pasteport_daemon::Request::CaptureNow) {

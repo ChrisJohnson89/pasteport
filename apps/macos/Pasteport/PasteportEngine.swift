@@ -106,17 +106,13 @@ struct StatusReport: Codable, Hashable {
     let backend: String
     let uptimeSecs: UInt64
     let pollIntervalMs: UInt64
-    let license: String
-    let licensed: Bool
-    let licenseNeedsAttention: Bool
     let stats: Stats
     let dataDir: String
 
     enum CodingKeys: String, CodingKey {
-        case version, backend, license, licensed, stats
+        case version, backend, stats
         case uptimeSecs = "uptime_secs"
         case pollIntervalMs = "poll_interval_ms"
-        case licenseNeedsAttention = "license_needs_attention"
         case dataDir = "data_dir"
     }
 }
@@ -241,10 +237,6 @@ actor PasteportEngine {
 
     func delete(id: Int64) async throws {
         _ = try await send(["op": "delete", "id": id])
-    }
-
-    func installLicense(key: String) async throws {
-        _ = try await send(["op": "license_install", "key": key])
     }
 
     /// Raw payload of a binary clip.

@@ -1,12 +1,29 @@
 # Pasteport for macOS
 
-SwiftUI menu bar app. It links the Rust engine as a static library and talks to
-`pasteportd` over the local socket.
+A double-clickable SwiftUI app that links the Rust engine as a static library and
+runs the background service out of its own bundle.
 
-> **Status: scaffolded, not yet buildable as an app bundle.** The Swift sources
-> and the FFI layer are complete and the Rust side is tested. What is missing is
-> the Xcode project that ties them together, plus the global hotkey. See
-> [Remaining work](#remaining-work).
+## Build and install
+
+```bash
+./apps/macos/build-app.sh --install
+```
+
+That produces `target/app/Pasteport.app` and copies it to `/Applications`. Drop
+`--install` to build without installing. `--universal` builds arm64 + x86_64.
+
+Requirements: Rust 1.82+, Xcode command line tools, macOS 14+.
+
+## Why there is no Xcode project
+
+An `.xcodeproj` is a large generated file that nobody reviews and that conflicts
+on every merge. Everything it would do here is four steps — compile Swift, link
+the static library, lay out the bundle, sign it — and those fit in
+[`build-app.sh`](build-app.sh) where they can be read.
+
+The tradeoff is no Xcode previews and no debugger integration. If that starts
+costing more than the project file would, generate one; nothing here depends on
+its absence.
 
 ## Layout
 
@@ -14,78 +31,94 @@ SwiftUI menu bar app. It links the Rust engine as a static library and talks to
 |---|---|
 | `Pasteport/pasteport.h` | C ABI exposed by `pasteport-ffi`, hand-written and checked in |
 | `Pasteport/PasteportEngine.swift` | `actor` wrapping the C ABI; Codable mirrors of the protocol types |
-| `Pasteport/PasteportApp.swift` | `MenuBarExtra` entry point and the observable model |
-| `Pasteport/HistoryView.swift` | Search panel, result rows, settings form |
+| `Pasteport/DaemonController.swift` | Finds, starts, and stops the bundled `pasteportd` |
+| `Pasteport/PasteportApp.swift` | Scenes, app delegate, and the observable model |
+| `Pasteport/HistoryView.swift` | Search panel, rows, settings |
+| `make-icon.swift` | Draws the icon with CoreGraphics and writes an `.iconset` |
+| `build-app.sh` | Everything above, assembled and signed |
 
 The FFI surface is four functions on purpose. The protocol is modelled in Swift
-as `Codable`, so adding a request never means touching the header or the Rust
-side.
+as `Codable`, so adding a request never touches the header or the Rust side.
 
-## Building the static library
+## How it starts the service
+
+`DaemonController` looks for `pasteportd` beside the app binary in
+`Contents/MacOS/`, and starts it if nothing is already listening on the socket.
+
+It is a **child process, not a LaunchAgent**. A plist in `~/Library/LaunchAgents`
+is state installed outside the bundle that survives dragging the app to the
+trash, and leaving a service running after someone has deleted the app is rude.
+A child process means uninstalling is still just "delete the app".
+
+Two consequences worth knowing:
+
+- If a `pasteportd` is already running — because you started one in a terminal —
+  the app attaches to it instead of starting a second one, and does **not** stop
+  it on quit. It only stops what it started.
+- Capture stops when the app quits. That is the right default for something with
+  no installer, but it does mean this is not a background-forever service yet.
+  Launch-at-login via `SMAppService` is on the roadmap.
+
+## The icon is generated
+
+`make-icon.swift` draws it: a rounded indigo tile, a clipboard, and a clock badge
+for history. Rendered at all ten sizes `iconutil` wants, so nothing is upscaled
+from a single PNG.
+
+Generated rather than committed because it stays reviewable — a colour or radius
+change is a readable diff instead of a new binary — and because it forced the
+small sizes to be checked. The text lines and the badge are dropped below 32pt,
+where they would turn to mush.
 
 ```bash
-cargo build --release -p pasteport-ffi --target aarch64-apple-darwin
+swift apps/macos/make-icon.swift /tmp/Pasteport.iconset
 ```
 
-```bash
-cargo build --release -p pasteport-ffi --target x86_64-apple-darwin
-```
+## Deployment target and the Rust standard library
 
-Then combine them into a universal library:
+The app is stamped `LSMinimumSystemVersion` 14.0. Whether that is *true* depends
+on your Rust toolchain:
 
-```bash
-lipo -create \
-  target/aarch64-apple-darwin/release/libpasteport_ffi.a \
-  target/x86_64-apple-darwin/release/libpasteport_ffi.a \
-  -output target/libpasteport_ffi.a
-```
+- **rustup** builds `std` against an old floor, so the claim holds.
+- **Homebrew's rust** builds `std` for the host OS. The linker then warns that
+  the Rust objects were built for a newer macOS than the app is being linked
+  for, and the 14.0 claim is not one you should publish.
 
-## Wiring it into Xcode
+`build-app.sh` detects this and prints a note rather than letting the warnings
+scroll past. For anything you intend to distribute, use a rustup toolchain.
 
-Once the project exists, four settings matter:
+## Verified
 
-1. **Bridging header** — point `SWIFT_OBJC_BRIDGING_HEADER` at
-   `Pasteport/pasteport.h`, or add a module map if you prefer a proper module.
-2. **Link the library** — add `libpasteport_ffi.a` to *Link Binary With
-   Libraries*, and its directory to `LIBRARY_SEARCH_PATHS`.
-3. **System libraries** — the Rust static library needs `libSystem` (implicit)
-   and AppKit, which the app already links.
-4. **`LSUIElement`** — set to `true` in `Info.plist`. A menu bar utility should
-   not own a dock icon.
+On macOS 26.5, built with the Homebrew toolchain:
 
-A build phase that runs the `cargo build` above before compiling Swift keeps the
-two halves in sync.
+- Installs to `/Applications`, launches from Finder, ad-hoc signature verifies
+- Starts the bundled `pasteportd` as a child process on first launch
+- Creates `~/Library/Application Support/Pasteport/` with `0700`
+- Window renders at 520×560; captures clips live while open, with correct kind
+  icons, relative timestamps, and use counts
+- No crash reports
 
-## Interaction model
-
-Deliberately the same as the GTK app, so muscle memory transfers:
-
-| Key | Action |
-|---|---|
-| type | filter as you go, debounced 120 ms |
-| Return | copy the highlighted row, or the top result if nothing is highlighted |
-| double click | copy |
-| Escape | close the panel |
-| right click | copy / pin / delete |
+**Not visually verified:** the menu bar item. `MenuBarExtra` is declared and the
+app builds, but an `NSStatusItem` is not a normal window so it cannot be
+confirmed the way the main window was — and a menu bar manager like Bartender
+will hide it regardless. Look for the clipboard icon in the menu bar.
 
 ## Remaining work
 
-- [ ] Xcode project or an SPM package with the build phase above
-- [ ] Global hotkey. Needs `Carbon.RegisterEventHotKey` or a
-      `CGEventTap`, and the latter requires Accessibility permission — the
-      trust prompt needs designing, not just calling
-- [ ] Paste-on-select: copying is done, synthesising ⌘V into the previously
-      focused app is not
+- [ ] Global hotkey. Needs `RegisterEventHotKey` or a `CGEventTap`; the latter
+      wants Accessibility permission, and that trust prompt needs designing
+- [ ] Paste-on-select: copying works, synthesising ⌘V into the previously focused
+      app does not
 - [ ] Image previews in rows. `get_bytes` already returns the payload
-- [ ] Launch-at-login for `pasteportd` via `SMAppService`
+- [ ] Launch at login via `SMAppService`, so capture survives quitting the app
 - [ ] Editing retention and the ignore list in Settings rather than `config.toml`
-- [ ] Signing, notarization, and a DMG
+- [ ] Developer ID signing, notarization, and a DMG
 
-## Running against a test daemon
+## Development against a scratch database
 
 ```bash
-pasteportd --data-dir /tmp/pp-dev --log debug
+PASTEPORT_DATA_DIR=/tmp/pp-dev open -a Pasteport
 ```
 
-The app reads `PASTEPORT_DATA_DIR` the same way the CLI does, so pointing both at
-a scratch directory keeps development away from your real history.
+The app, the service, and the CLI all read that variable, so pointing them at a
+throwaway directory keeps development away from your real history.

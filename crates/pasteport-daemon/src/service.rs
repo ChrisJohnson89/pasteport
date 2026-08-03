@@ -6,7 +6,6 @@ use std::time::Instant;
 use base64::Engine as _;
 use pasteport_clipboard::{ClipboardBackend, Payload};
 use pasteport_core::{Clip, Config, InsertOutcome, NewClip, Store};
-use pasteport_license::Licensing;
 
 use crate::protocol::{Request, Response, StatusReport};
 
@@ -22,7 +21,6 @@ const MAX_LIMIT: usize = 1_000;
 pub struct Service {
     store: Arc<Mutex<Store>>,
     config: Config,
-    licensing: Licensing,
     /// Separate clipboard handle used for writes, so a `Copy` request never
     /// waits on the watcher thread's poll.
     writer: Mutex<Box<dyn ClipboardBackend>>,
@@ -45,7 +43,6 @@ impl Service {
     pub fn new(
         store: Arc<Mutex<Store>>,
         config: Config,
-        licensing: Licensing,
         writer: Box<dyn ClipboardBackend>,
         data_dir: PathBuf,
     ) -> Self {
@@ -53,7 +50,6 @@ impl Service {
         Service {
             store,
             config,
-            licensing,
             writer: Mutex::new(writer),
             backend_name,
             started: Instant::now(),
@@ -101,21 +97,9 @@ impl Service {
     ///
     /// Every arm returns a `Response` rather than propagating an error, so a
     /// bad request from one client never takes the daemon down.
+    /// Pasteport is free: every request is served, with no entitlement check
+    /// of any kind. There is deliberately no gate here to reintroduce.
     pub fn handle(&self, req: Request) -> Response {
-        // Licensing gates mutating and reading operations alike once the trial
-        // is over, but never gates `Status`, `Ping`, or the license operations
-        // themselves. Someone whose trial lapsed must still be able to see why
-        // and paste in a key.
-        if !self.is_license_exempt(&req) {
-            let status = self.licensing.status();
-            if !status.is_functional() {
-                return Response::error(format!(
-                    "{}. Run `pasteport license install <key>` to continue.",
-                    status.summary()
-                ));
-            }
-        }
-
         match req {
             Request::Ping => Response::Pong {
                 version: pasteport_core::VERSION.to_string(),
@@ -220,37 +204,12 @@ impl Service {
                 }
             }
 
-            Request::LicenseInstall { key } => match self.licensing.install_key(&key) {
-                Ok(license) => {
-                    tracing::info!(license = %license.masked(), "license installed");
-                    Response::Ok
-                }
-                Err(e) => Response::error(e),
-            },
-
-            Request::LicenseRemove => match self.licensing.remove_key() {
-                Ok(()) => Response::Ok,
-                Err(e) => Response::error(e),
-            },
-
             Request::Shutdown => {
                 tracing::info!("shutdown requested");
                 self.shutdown.store(true, Ordering::Relaxed);
                 Response::Ok
             }
         }
-    }
-
-    /// Requests that must work even without a valid license.
-    fn is_license_exempt(&self, req: &Request) -> bool {
-        matches!(
-            req,
-            Request::Ping
-                | Request::Status
-                | Request::Shutdown
-                | Request::LicenseInstall { .. }
-                | Request::LicenseRemove
-        )
     }
 
     fn lock(&self) -> std::sync::MutexGuard<'_, Store> {
@@ -262,15 +221,11 @@ impl Service {
             Ok(s) => s,
             Err(e) => return Response::error(e),
         };
-        let license = self.licensing.status();
         Response::Status(Box::new(StatusReport {
             version: pasteport_core::VERSION.to_string(),
             backend: self.backend_name.clone(),
             uptime_secs: self.started.elapsed().as_secs(),
             poll_interval_ms: self.config.poll_interval_ms,
-            license: license.summary(),
-            licensed: license.is_functional(),
-            license_needs_attention: license.needs_attention(),
             stats,
             data_dir: self.data_dir.display().to_string(),
         }))
@@ -415,9 +370,6 @@ mod tests {
         Service::new(
             store,
             Config::default(),
-            // Unconfigured licensing: a source build, always functional. The
-            // licensing gate itself is tested in pasteport-license.
-            Licensing::unconfigured(),
             backend,
             PathBuf::from("/tmp/pasteport-test"),
         )
@@ -457,7 +409,6 @@ mod tests {
         };
         assert_eq!(report.backend, "fake");
         assert_eq!(report.stats.total_clips, 2);
-        assert!(report.licensed);
     }
 
     #[test]
@@ -684,7 +635,6 @@ mod tests {
         let svc = Service::new(
             store,
             Config::default(),
-            Licensing::unconfigured(),
             Box::new(backend),
             PathBuf::from("/tmp/pasteport-test"),
         );
@@ -727,7 +677,6 @@ mod tests {
         let svc = Service::new(
             store,
             config,
-            Licensing::unconfigured(),
             Box::new(FakeClipboard::default()),
             PathBuf::from("/tmp/pasteport-test"),
         );

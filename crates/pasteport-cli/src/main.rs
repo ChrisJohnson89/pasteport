@@ -89,9 +89,6 @@ enum Command {
     /// Manage pinboards.
     #[command(subcommand)]
     Board(BoardCommand),
-    /// Manage licensing.
-    #[command(subcommand)]
-    License(LicenseCommand),
 }
 
 #[derive(Debug, Subcommand)]
@@ -112,16 +109,6 @@ enum BoardCommand {
         #[arg(short = 'n', long, default_value_t = 50)]
         limit: usize,
     },
-}
-
-#[derive(Debug, Subcommand)]
-enum LicenseCommand {
-    /// Install a license key.
-    Install { key: String },
-    /// Remove the installed license.
-    Remove,
-    /// Show the current license state.
-    Status,
 }
 
 fn main() -> anyhow::Result<()> {
@@ -216,11 +203,6 @@ fn build_request(command: &Command) -> Request {
             name: name.clone(),
             limit: *limit,
         },
-        Command::License(LicenseCommand::Install { key }) => {
-            Request::LicenseInstall { key: key.clone() }
-        }
-        Command::License(LicenseCommand::Remove) => Request::LicenseRemove,
-        Command::License(LicenseCommand::Status) => Request::Status,
     }
 }
 
@@ -285,17 +267,7 @@ fn render(command: &Command, response: &Response) -> anyhow::Result<()> {
             _ => println!("{count}"),
         },
 
-        Response::Status(report) => {
-            if matches!(command, Command::License(_)) {
-                println!("{}", report.license);
-                if !report.licensed {
-                    println!("\nInstall a key with: pasteport license install <key>");
-                    std::process::exit(1);
-                }
-            } else {
-                print_status(report);
-            }
-        }
+        Response::Status(report) => print_status(report),
 
         Response::Pong { version } => println!("pasteportd {version}"),
         Response::Bytes { base64 } => match base64 {
@@ -330,7 +302,6 @@ fn print_clip_table(clips: &[Clip]) {
 fn print_status(report: &pasteport_daemon::StatusReport) {
     let s = &report.stats;
     println!("Pasteport {}", report.version);
-    println!("  license        {}", report.license);
     println!("  backend        {}", report.backend);
     println!("  uptime         {}", format_duration(report.uptime_secs));
     println!("  poll interval  {} ms", report.poll_interval_ms);
@@ -349,10 +320,6 @@ fn print_status(report: &pasteport_daemon::StatusReport) {
             "substring"
         }
     );
-    if report.license_needs_attention {
-        println!("\n{}", report.license);
-        println!("Install a key with: pasteport license install <key>");
-    }
 }
 
 fn format_duration(secs: u64) -> String {
@@ -465,14 +432,6 @@ mod tests {
             Request::Clear {
                 include_pinned: false
             }
-        );
-    }
-
-    #[test]
-    fn license_status_reuses_the_status_request() {
-        assert_eq!(
-            build_request(&Command::License(LicenseCommand::Status)),
-            Request::Status
         );
     }
 

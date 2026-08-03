@@ -221,16 +221,14 @@ fn build_ui(app: &Application) {
         ));
     } else {
         refresh("");
-        // Surface the licence state in the title bar, where it is visible
-        // without being in the way of the list.
+        // Put the version in the title bar, where it is visible without being
+        // in the way of the list.
         match engine.status() {
             Ok(report) => {
-                let subtitle = if report.license_needs_attention {
-                    format!("Pasteport {} — {}", report.version, report.license)
-                } else {
-                    format!("Pasteport {}", report.version)
-                };
-                window.set_title(Some(&subtitle));
+                window.set_title(Some(&format!(
+                    "Pasteport {} — {} clips",
+                    report.version, report.stats.total_clips
+                )));
             }
             Err(e) => tracing::warn!(error = %e, "could not read service status"),
         }
