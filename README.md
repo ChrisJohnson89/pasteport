@@ -1,5 +1,8 @@
 # Pasteport
 
+[![CI](https://github.com/ChrisJohnson89/pasteport/actions/workflows/ci.yml/badge.svg)](https://github.com/ChrisJohnson89/pasteport/actions/workflows/ci.yml)
+[![License: AGPL v3](https://img.shields.io/badge/license-AGPL--3.0-blue.svg)](LICENSE)
+
 Clipboard history for macOS and Linux. Local-first, no account, no sync server,
 no telemetry.
 
