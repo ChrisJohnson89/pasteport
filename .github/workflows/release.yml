@@ -111,6 +111,15 @@ jobs:
         run: |
           set -euo pipefail
           V="${{ needs.guard.outputs.version }}"
+
+          # The DMG build only needs the FFI library and the daemon, so the
+          # `pasteport` CLI has not been built for either target yet. Build both
+          # packages explicitly rather than assuming the app build left them
+          # behind — that assumption is what broke the first release run.
+          for target in aarch64-apple-darwin x86_64-apple-darwin; do
+            cargo build --release --target "$target" -p pasteport-cli -p pasteport-daemon
+          done
+
           mkdir -p dist
           # Universal CLI binaries, for people who only want the terminal side.
           for bin in pasteport pasteportd; do
