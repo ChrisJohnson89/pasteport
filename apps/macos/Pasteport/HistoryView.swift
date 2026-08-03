@@ -91,26 +91,40 @@ struct HistoryView: View {
     // MARK: List
 
     private var clipList: some View {
-        List(model.clips, selection: $selection) { clip in
-            ClipRow(clip: clip)
-                .contentShape(Rectangle())
-                .onTapGesture(count: 2) {
-                    Task { await model.copy(clip) }
-                }
-                .contextMenu {
-                    Button("Copy to Clipboard") {
+        ScrollViewReader { proxy in
+            List(model.clips, selection: $selection) { clip in
+                ClipRow(clip: clip)
+                    .id(clip.id)
+                    .contentShape(Rectangle())
+                    .onTapGesture(count: 2) {
                         Task { await model.copy(clip) }
                     }
-                    Button(clip.pinned ? "Unpin" : "Pin") {
-                        Task { await model.togglePin(clip) }
+                    .contextMenu {
+                        Button("Copy to Clipboard") {
+                            Task { await model.copy(clip) }
+                        }
+                        Button(clip.pinned ? "Unpin" : "Pin") {
+                            Task { await model.togglePin(clip) }
+                        }
+                        Divider()
+                        Button("Delete", role: .destructive) {
+                            Task { await model.delete(clip) }
+                        }
                     }
-                    Divider()
-                    Button("Delete", role: .destructive) {
-                        Task { await model.delete(clip) }
-                    }
-                }
+            }
+            .listStyle(.inset)
+            // Re-anchor to the top whenever the leading clip changes.
+            //
+            // New clips are inserted at the front, and SwiftUI keeps the scroll
+            // offset pinned to the old content — so the newest row lands *above*
+            // the visible area and the list silently looks like it did not update.
+            // That hid a pinned clip during testing while the footer still counted
+            // it, which is the worst version of this: present, counted, invisible.
+            .onChange(of: model.clips.first?.id) { _, top in
+                guard let top else { return }
+                proxy.scrollTo(top, anchor: .top)
+            }
         }
-        .listStyle(.inset)
     }
 
     private var emptyState: some View {

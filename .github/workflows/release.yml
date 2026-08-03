@@ -1,0 +1,250 @@
+name: Release
+
+# Releases are driven by the version in Cargo.toml.
+#
+# Bump `[workspace.package] version`, merge to main, and this publishes a release
+# with a DMG attached. No tag to remember to push and no manual step that can be
+# forgotten, which is the usual way a release ends up missing an artifact.
+#
+# Re-running on an unchanged version is a no-op: the guard job checks whether the
+# release already exists and stops if it does, so pushing twice cannot produce a
+# duplicate or overwrite published binaries.
+on:
+  push:
+    branches: [main]
+    paths:
+      - "Cargo.toml"
+      - ".github/workflows/release.yml"
+  workflow_dispatch:
+    inputs:
+      force:
+        description: "Publish even if a release for this version already exists"
+        type: boolean
+        default: false
+
+# One release at a time. Two concurrent runs could both pass the guard and race
+# to create the same tag.
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  guard:
+    name: Should we release?
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.check.outputs.version }}
+      release: ${{ steps.check.outputs.release }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - id: check
+        env:
+          GH_TOKEN: ${{ github.token }}
+          FORCE: ${{ inputs.force }}
+        run: |
+          set -euo pipefail
+          VERSION="$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)"
+          if [[ -z "$VERSION" ]]; then
+            echo "::error::could not read version from Cargo.toml"
+            exit 1
+          fi
+          # Reject anything that is not plain semver before it becomes a tag.
+          if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+            echo "::error::version '$VERSION' is not semver"
+            exit 1
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+          if [[ "${FORCE:-false}" == "true" ]]; then
+            echo "release=true" >> "$GITHUB_OUTPUT"
+            echo "Forcing a release of v$VERSION"
+          elif gh release view "v$VERSION" >/dev/null 2>&1; then
+            echo "release=false" >> "$GITHUB_OUTPUT"
+            echo "v$VERSION is already released; nothing to do."
+          else
+            echo "release=true" >> "$GITHUB_OUTPUT"
+            echo "v$VERSION is new; building a release."
+          fi
+
+  macos:
+    name: macOS app and DMG
+    needs: guard
+    if: needs.guard.outputs.release == 'true'
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          # Both halves of the universal binary. rustup's prebuilt std also
+          # targets an old macOS floor, which is what makes the app's
+          # LSMinimumSystemVersion honest — a Homebrew toolchain builds std for
+          # the host OS and the claim stops being true.
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Build the DMG
+        run: ./apps/macos/make-dmg.sh --universal
+
+      - name: Confirm it is universal
+        run: |
+          set -euo pipefail
+          ARCHS="$(lipo -archs target/app/Pasteport.app/Contents/MacOS/Pasteport)"
+          echo "app architectures: $ARCHS"
+          for want in arm64 x86_64; do
+            grep -q "$want" <<< "$ARCHS" || { echo "::error::missing $want"; exit 1; }
+          done
+          # The embedded service has to be universal too, or the app works on
+          # Apple silicon and fails to start its daemon on Intel.
+          DAEMON_ARCHS="$(lipo -archs target/app/Pasteport.app/Contents/MacOS/pasteportd)"
+          echo "daemon architectures: $DAEMON_ARCHS"
+          for want in arm64 x86_64; do
+            grep -q "$want" <<< "$DAEMON_ARCHS" || { echo "::error::daemon missing $want"; exit 1; }
+          done
+
+      - name: Package the CLI
+        run: |
+          set -euo pipefail
+          V="${{ needs.guard.outputs.version }}"
+          mkdir -p dist
+          # Universal CLI binaries, for people who only want the terminal side.
+          for bin in pasteport pasteportd; do
+            lipo -create -output "dist/$bin" \
+              "target/aarch64-apple-darwin/release/$bin" \
+              "target/x86_64-apple-darwin/release/$bin"
+          done
+          cp README.md LICENSE dist/
+          tar -czf "target/dmg/pasteport-$V-macos-universal.tar.gz" -C dist .
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos
+          path: target/dmg/*
+          if-no-files-found: error
+
+  linux:
+    name: Linux CLI
+    needs: guard
+    if: needs.guard.outputs.release == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Build
+        run: cargo build --release --bins
+
+      - name: Package
+        run: |
+          set -euo pipefail
+          V="${{ needs.guard.outputs.version }}"
+          mkdir -p dist out
+          cp target/release/pasteport target/release/pasteportd dist/
+          cp README.md LICENSE dist/
+          tar -czf "out/pasteport-$V-linux-x86_64.tar.gz" -C dist .
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux
+          path: out/*
+          if-no-files-found: error
+
+  publish:
+    name: Publish release
+    needs: [guard, macos, linux]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Full history and tags: the changelog is computed from the previous tag.
+          fetch-depth: 0
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Collect and checksum
+        id: collect
+        run: |
+          set -euo pipefail
+          mkdir -p release
+          find artifacts -type f \( -name "*.dmg" -o -name "*.tar.gz" \) -exec cp {} release/ \;
+          cd release
+          shasum -a 256 * > SHA256SUMS.txt
+          echo "--- release contents ---"
+          ls -la
+          cat SHA256SUMS.txt
+
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          V="${{ needs.guard.outputs.version }}"
+          DMG="$(basename "$(ls release/*.dmg | head -1)")"
+
+          # The Gatekeeper note is not boilerplate: the build is ad-hoc signed
+          # rather than notarized, so the first launch *will* be blocked and
+          # anyone who is not told that reasonably concludes the app is broken.
+          cat > notes.md <<NOTES
+          Free clipboard history for macOS and Linux. Local-first, no account, no telemetry.
+
+          ## Install on macOS
+
+          Download **$DMG**, open it, and drag Pasteport to Applications.
+
+          On first launch macOS will say *"Pasteport cannot be opened because the developer
+          cannot be verified"*. This build is signed but **not notarized by Apple**, which
+          costs a paid Developer ID that a free project does not have. To open it:
+
+          > Right-click Pasteport in Applications → **Open** → **Open**
+
+          macOS remembers the choice, so this is a one-time step. Or from a terminal:
+
+          \`\`\`
+          xattr -dr com.apple.quarantine /Applications/Pasteport.app
+          \`\`\`
+
+          The app is universal (Apple silicon and Intel) and needs macOS 14 or newer.
+          It contains the background service and starts it on launch, so there is nothing
+          else to install.
+
+          ## Install on Linux
+
+          Extract \`pasteport-$V-linux-x86_64.tar.gz\` and put \`pasteport\` and
+          \`pasteportd\` on your PATH. You will also need a clipboard helper:
+
+          \`\`\`
+          sudo apt install wl-clipboard xclip
+          \`\`\`
+
+          The GTK4 front end is not in this release; build it from source.
+
+          ## Verify your download
+
+          Checksums are in \`SHA256SUMS.txt\`.
+          NOTES
+
+          # Append a changelog from the commits since the previous tag. Written
+          # here rather than with --generate-notes, because combining that flag
+          # with --notes-file has no documented precedence and quietly dropping
+          # the install instructions would be worse than having no changelog.
+          PREV="$(git tag --list 'v*' --sort=-v:refname | head -1)"
+          if [[ -n "$PREV" ]]; then
+            printf '\n## Changes since %s\n\n' "$PREV" >> notes.md
+            git log --no-merges --pretty='- %s' "$PREV..HEAD" >> notes.md
+          fi
+
+          gh release create "v$V" \
+            --title "Pasteport $V" \
+            --notes-file notes.md \
+            --target "${{ github.sha }}" \
+            release/*
+
+          echo "Published: $(gh release view "v$V" --json url -q .url)"

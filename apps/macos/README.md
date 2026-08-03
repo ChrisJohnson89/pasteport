@@ -14,6 +14,22 @@ That produces `target/app/Pasteport.app` and copies it to `/Applications`. Drop
 
 Requirements: Rust 1.82+, Xcode command line tools, macOS 14+.
 
+## Build a DMG
+
+```bash
+./apps/macos/make-dmg.sh --universal
+```
+
+Writes `target/dmg/Pasteport-<version>.dmg` with the app and an Applications
+symlink, then mounts it and checks the bundle inside still verifies and carries
+the expected version. A DMG that turns out to be empty or to hold a broken
+signature is worth catching here rather than in somebody's Downloads folder.
+
+Releases are automatic: bump `version` in the workspace `Cargo.toml`, merge to
+main, and [`release.yml`](../../.github/workflows/release.yml) publishes a
+GitHub release with the DMG attached. It skips if that version is already
+released, so pushing twice cannot duplicate or overwrite anything.
+
 ## Why there is no Xcode project
 
 An `.xcodeproj` is a large generated file that nobody reviews and that conflicts
@@ -96,6 +112,11 @@ On macOS 26.5, built with the Homebrew toolchain:
 - Creates `~/Library/Application Support/Pasteport/` with `0700`
 - Window renders at 520×560; captures clips live while open, with correct kind
   icons, relative timestamps, and use counts
+- New and newly-pinned clips stay visible at the top of the list. SwiftUI keeps a
+  `List`'s scroll offset anchored to the old content when rows are inserted at the
+  front, which pushed the newest clip above the visible area — the footer counted
+  a pinned clip the list was not showing. `clipList` re-anchors on change.
+- Packages into a DMG that mounts, verifies, and reports the right version
 - No crash reports
 
 **Not visually verified:** the menu bar item. `MenuBarExtra` is declared and the
@@ -112,7 +133,8 @@ will hide it regardless. Look for the clipboard icon in the menu bar.
 - [ ] Image previews in rows. `get_bytes` already returns the payload
 - [ ] Launch at login via `SMAppService`, so capture survives quitting the app
 - [ ] Editing retention and the ignore list in Settings rather than `config.toml`
-- [ ] Developer ID signing, notarization, and a DMG
+- [ ] Developer ID signing and notarization, so the DMG opens without the
+      right-click dance
 
 ## Development against a scratch database
 
