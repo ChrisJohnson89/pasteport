@@ -203,9 +203,10 @@ jobs:
           V="${{ needs.guard.outputs.version }}"
           DMG="$(basename "$(ls release/*.dmg | head -1)")"
 
-          # The Gatekeeper note is not boilerplate: the build is ad-hoc signed
-          # rather than notarized, so the first launch *will* be blocked and
-          # anyone who is not told that reasonably concludes the app is broken.
+          # The Gatekeeper note is not boilerplate: an ad-hoc signature is not a
+          # Developer ID, so the first launch *will* be blocked, and anyone not
+          # told that reasonably concludes the app is broken. It must also point at
+          # System Settings rather than Control-click → Open, which Sequoia removed.
           cat > notes.md <<NOTES
           Free clipboard history for macOS and Linux. Local-first, no account, no telemetry.
 
@@ -213,13 +214,18 @@ jobs:
 
           Download **$DMG**, open it, and drag Pasteport to Applications.
 
-          On first launch macOS will say *"Pasteport cannot be opened because the developer
-          cannot be verified"*. This build is signed but **not notarized by Apple**, which
-          costs a paid Developer ID that a free project does not have. To open it:
+          macOS will block the first launch. This build carries only an **ad-hoc signature**,
+          not an Apple Developer certificate — that costs a paid Developer ID a free project
+          does not have — so Gatekeeper treats it as unidentified. To open it:
 
-          > Right-click Pasteport in Applications → **Open** → **Open**
+          > 1. Double-click Pasteport. macOS blocks it.
+          > 2. Open **System Settings → Privacy & Security**.
+          > 3. Scroll down and click **Open Anyway** next to the Pasteport message.
 
-          macOS remembers the choice, so this is a one-time step. Or from a terminal:
+          macOS remembers the choice, so this is a one-time step.
+
+          Control-clicking and choosing Open does *not* work: Apple removed that bypass in
+          macOS Sequoia. Or, from a terminal:
 
           \`\`\`
           xattr -dr com.apple.quarantine /Applications/Pasteport.app

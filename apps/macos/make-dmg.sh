@@ -71,13 +71,20 @@ To install: drag Pasteport to the Applications folder beside it.
 
 First launch
 ------------
-This build is signed but not notarized by Apple, so the first launch shows
-"Pasteport cannot be opened because the developer cannot be verified".
+macOS will block the first launch. This build carries only an ad-hoc signature,
+not an Apple Developer certificate, so Gatekeeper treats it as unidentified.
 
-To open it anyway: right-click Pasteport in Applications, choose Open, then
-click Open in the dialog. macOS remembers the choice, so this is once only.
+To open it:
+    1. Double-click Pasteport. macOS blocks it.
+    2. Open System Settings > Privacy & Security.
+    3. Scroll down and click "Open Anyway" next to the Pasteport message.
 
-Alternatively, from a terminal:
+macOS remembers the choice, so this is once only.
+
+Note: Control-clicking and choosing Open no longer bypasses this. Apple removed
+that path in macOS Sequoia; System Settings is the way now.
+
+Or, from a terminal:
     xattr -dr com.apple.quarantine /Applications/Pasteport.app
 
 Pasteport is free software under the AGPL-3.0-or-later.

@@ -20,8 +20,9 @@ Local-first. No account, no sync server, no telemetry, no paid tier.
 **macOS** — [download the latest DMG](https://github.com/ChrisJohnson89/pasteport/releases/latest),
 open it, drag Pasteport to Applications.
 
-> First launch shows *"the developer cannot be verified"* — the build is signed
-> but not notarized. Right-click Pasteport → **Open** → **Open**. Once only.
+> First launch is blocked, because the build carries only an ad-hoc signature
+> rather than an Apple Developer certificate. Open it once via **System Settings →
+> Privacy & Security → Open Anyway**. Once only.
 
 **Linux** — grab the CLI tarball from the same page, or build from source:
 

@@ -107,7 +107,10 @@ scroll past. For anything you intend to distribute, use a rustup toolchain.
 
 On macOS 26.5, built with the Homebrew toolchain:
 
-- Installs to `/Applications`, launches from Finder, ad-hoc signature verifies
+- Installs to `/Applications`, launches from Finder, ad-hoc signature verifies.
+  Note that ad-hoc is *not* a Developer ID: `spctl --assess` rejects the bundle
+  once it carries a quarantine flag, which is why a downloaded copy needs
+  System Settings → Privacy & Security on first launch.
 - Starts the bundled `pasteportd` as a child process on first launch
 - Creates `~/Library/Application Support/Pasteport/` with `0700`
 - Window renders at 520×560; captures clips live while open, with correct kind
@@ -133,8 +136,9 @@ will hide it regardless. Look for the clipboard icon in the menu bar.
 - [ ] Image previews in rows. `get_bytes` already returns the payload
 - [ ] Launch at login via `SMAppService`, so capture survives quitting the app
 - [ ] Editing retention and the ignore list in Settings rather than `config.toml`
-- [ ] Developer ID signing and notarization, so the DMG opens without the
-      right-click dance
+- [ ] Developer ID signing and notarization, so the first launch is not blocked.
+      Until then the ad-hoc signature makes Gatekeeper treat the app as
+      unidentified, and users need System Settings → Privacy & Security
 
 ## Development against a scratch database
 
