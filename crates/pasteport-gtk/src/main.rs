@@ -99,20 +99,22 @@ fn build_ui(app: &Application) {
     // without reaching back into the widget tree.
     let visible: Rc<RefCell<Vec<i64>>> = Rc::new(RefCell::new(Vec::new()));
 
-    let refresh = {
+    // Takes the query as an argument rather than capturing the search entry.
+    // Capturing it would make a cycle: the entry owns the signal handler, the
+    // handler owns this Rc, and this Rc would own the entry.
+    let refresh: Rc<dyn Fn(&str)> = {
         let engine = Rc::clone(&engine);
         let list = list.clone();
         let status = status.clone();
-        let search = search.clone();
         let visible = Rc::clone(&visible);
 
-        Rc::new(move || {
+        Rc::new(move |query: &str| {
             while let Some(child) = list.first_child() {
                 list.remove(&child);
             }
             visible.borrow_mut().clear();
 
-            match engine.clips(search.text().as_str(), PAGE_SIZE) {
+            match engine.clips(query, PAGE_SIZE) {
                 Ok(clips) if clips.is_empty() => {
                     status.set_text("No clips match.");
                 }
@@ -137,7 +139,7 @@ fn build_ui(app: &Application) {
     // Search as you type.
     {
         let refresh = Rc::clone(&refresh);
-        search.connect_search_changed(move |_| refresh());
+        search.connect_search_changed(move |entry| refresh(entry.text().as_str()));
     }
 
     // Enter, or a double click, copies and closes.
@@ -164,6 +166,7 @@ fn build_ui(app: &Application) {
         let list = list.clone();
         let status = status.clone();
         let window_for_keys = window.clone();
+        let search_for_keys = search.clone();
 
         let keys = gtk::EventControllerKey::new();
         keys.connect_key_pressed(move |_, key, _, modifiers| {
@@ -185,16 +188,21 @@ fn build_ui(app: &Application) {
                         if let Err(e) = engine.set_pinned(id, true) {
                             status.set_text(&format!("{e}"));
                         }
-                        refresh();
+                        refresh(search_for_keys.text().as_str());
                     }
                     glib::Propagation::Stop
                 }
-                gdk::Key::Delete | gdk::Key::BackSpace => {
+                // Delete only, deliberately not BackSpace. The search entry has
+                // focus most of the time, and while bubble-phase propagation
+                // means the entry consumes BackSpace for editing, binding a
+                // destructive action to the key people press to fix a typo is
+                // asking for an accident.
+                gdk::Key::Delete => {
                     if let Some(id) = selected_id() {
                         if let Err(e) = engine.delete(id) {
                             status.set_text(&format!("{e}"));
                         }
-                        refresh();
+                        refresh(search_for_keys.text().as_str());
                     }
                     glib::Propagation::Stop
                 }
@@ -212,7 +220,20 @@ fn build_ui(app: &Application) {
             engine.socket_path().display()
         ));
     } else {
-        refresh();
+        refresh("");
+        // Surface the licence state in the title bar, where it is visible
+        // without being in the way of the list.
+        match engine.status() {
+            Ok(report) => {
+                let subtitle = if report.license_needs_attention {
+                    format!("Pasteport {} — {}", report.version, report.license)
+                } else {
+                    format!("Pasteport {}", report.version)
+                };
+                window.set_title(Some(&subtitle));
+            }
+            Err(e) => tracing::warn!(error = %e, "could not read service status"),
+        }
     }
 
     window.present();
