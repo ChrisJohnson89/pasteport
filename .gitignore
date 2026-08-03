@@ -1,0 +1,26 @@
+/target
+**/*.rs.bk
+Cargo.lock.orig
+
+# macOS
+.DS_Store
+apps/macos/.build/
+apps/macos/*.xcodeproj/xcuserdata/
+apps/macos/*.xcworkspace/xcuserdata/
+DerivedData/
+
+# Generated FFI artifacts
+include/pasteport.h.tmp
+
+# Local secrets: signing keys must never be committed
+*.pem
+*.p12
+signing-key*
+!docs/licensing.md
+.env
+.env.local
+
+# Editor
+.idea/
+.vscode/
+*.swp

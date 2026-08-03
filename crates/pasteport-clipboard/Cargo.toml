@@ -1,0 +1,21 @@
+[package]
+name = "pasteport-clipboard"
+description = "Platform clipboard backends for Pasteport (macOS NSPasteboard, Linux Wayland/X11)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]
+pasteport-core.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6"
+objc2-foundation = { version = "0.3", default-features = false, features = [
+    "std",
+    "NSString",
+] }

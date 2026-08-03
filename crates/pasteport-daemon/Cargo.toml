@@ -1,0 +1,35 @@
+[package]
+name = "pasteport-daemon"
+description = "Pasteport background service: watches the clipboard and serves the local API"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[lib]
+name = "pasteport_daemon"
+path = "src/lib.rs"
+
+[[bin]]
+name = "pasteportd"
+path = "src/main.rs"
+
+[dependencies]
+pasteport-core.workspace = true
+pasteport-clipboard.workspace = true
+pasteport-license.workspace = true
+
+anyhow.workspace = true
+base64.workspace = true
+clap.workspace = true
+libc = "0.2"
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

@@ -1,0 +1,108 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+  # Fail the build on warnings, so lint debt cannot accumulate quietly.
+  RUSTFLAGS: -D warnings
+
+jobs:
+  test:
+    name: test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, ubuntu-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+
+      - uses: Swatinem/rust-cache@v2
+
+      # The Linux backend shells out to these; the tests that exercise them
+      # skip cleanly when they are absent, but CI should cover the real path.
+      - name: Install clipboard helpers
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y wl-clipboard xclip xsel
+
+      - name: Formatting
+        run: cargo fmt --all --check
+
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets --all-features
+
+      - name: Tests
+        run: cargo test --workspace --all-features
+
+      - name: Build release binaries
+        run: cargo build --release --bins
+
+      # Smoke test: the daemon must start, answer, and shut down cleanly. This
+      # catches wiring mistakes that unit tests cannot see.
+      - name: Daemon smoke test
+        shell: bash
+        run: |
+          set -euo pipefail
+          export PASTEPORT_DATA_DIR="${RUNNER_TEMP}/pasteport-ci"
+          mkdir -p "$PASTEPORT_DATA_DIR"
+
+          # Headless Linux runners have no clipboard at all, so run the daemon
+          # in private mode and drive it through the socket only.
+          ./target/release/pasteportd --private --log debug &
+          DAEMON_PID=$!
+
+          for _ in $(seq 1 50); do
+            [ -S "$PASTEPORT_DATA_DIR/daemon.sock" ] && break
+            sleep 0.2
+          done
+
+          ./target/release/pasteport status
+          ./target/release/pasteport board create ci
+          ./target/release/pasteport board list
+          ./target/release/pasteport list --json
+
+          ./target/release/pasteport --json license status || true
+          kill "$DAEMON_PID"
+          wait "$DAEMON_PID" 2>/dev/null || true
+        env:
+          # xvfb is not set up, so the Linux backend will report no display.
+          # Private mode plus socket-only commands keeps this meaningful anyway.
+          RUST_LOG: pasteport=debug
+
+  gtk:
+    name: gtk4 front end (linux)
+    runs-on: ubuntu-latest
+    # Excluded from the default workspace because it needs system GTK4 headers,
+    # so it gets its own job rather than being skipped everywhere.
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Install GTK4
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgtk-4-dev build-essential
+      - name: Build
+        run: cargo build --manifest-path crates/pasteport-gtk/Cargo.toml
+
+  audit:
+    name: dependency audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install cargo-audit
+        run: cargo install cargo-audit --locked
+      - name: Audit
+        run: cargo audit

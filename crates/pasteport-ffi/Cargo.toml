@@ -1,0 +1,22 @@
+[package]
+name = "pasteport-ffi"
+description = "C ABI for embedding the Pasteport engine in the SwiftUI app"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[lib]
+name = "pasteport_ffi"
+# staticlib for linking into the macOS app bundle; rlib so tests can run.
+crate-type = ["staticlib", "rlib"]
+
+[dependencies]
+pasteport-core.workspace = true
+pasteport-daemon.workspace = true
+serde_json.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

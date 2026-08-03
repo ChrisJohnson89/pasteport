@@ -1,0 +1,27 @@
+[package]
+name = "pasteport-core"
+description = "Platform-agnostic clipboard history engine for Pasteport"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]
+blake3.workspace = true
+directories.workspace = true
+rusqlite.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+time.workspace = true
+toml.workspace = true
+tracing.workspace = true
+
+[target.'cfg(unix)'.dependencies]
+# Safe wrapper for getuid: pasteport-core forbids unsafe code outright.
+rustix = { version = "0.38", features = ["process"] }
+
+[dev-dependencies]
+tempfile.workspace = true

@@ -1,0 +1,27 @@
+[package]
+name = "pasteport-gtk"
+description = "GTK4 front end for Pasteport (Linux)"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.82"
+license = "AGPL-3.0-or-later"
+repository = "https://github.com/ChrisJohnson89/pasteport"
+authors = ["Christopher Johnson"]
+
+# Excluded from the root workspace: this crate needs system GTK4 development
+# headers, which a macOS contributor will not have. It has its own lockfile and
+# its own CI job.
+
+[[bin]]
+name = "pasteport-gtk"
+path = "src/main.rs"
+
+[dependencies]
+pasteport-core = { path = "../pasteport-core" }
+pasteport-daemon = { path = "../pasteport-daemon" }
+
+anyhow = "1.0"
+gtk = { package = "gtk4", version = "0.9", features = ["v4_10"] }
+serde_json = "1.0"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
