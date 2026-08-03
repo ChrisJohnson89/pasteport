@@ -101,6 +101,12 @@ hdiutil create \
   -quiet \
   "$DMG"
 
+# The staging directory has done its job. Remove it rather than leaving a copy of
+# the app and an `Applications` symlink lying around: anything that later globs
+# target/dmg/* and follows symlinks would walk the whole of /Applications. That
+# is not hypothetical — it OOM-killed the release workflow's artifact upload.
+rm -rf "$STAGE"
+
 # ------------------------------------------------------------------- verify
 #
 # Mount it and check the app is actually in there and still verifies. Building a

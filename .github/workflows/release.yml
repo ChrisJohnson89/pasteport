@@ -133,7 +133,12 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: macos
-          path: target/dmg/*
+          # Explicit patterns, not target/dmg/*. A directory glob picked up the
+          # staging tree, whose Applications symlink the uploader followed into
+          # the runner's real /Applications until Node ran out of heap.
+          path: |
+            target/dmg/*.dmg
+            target/dmg/*.tar.gz
           if-no-files-found: error
 
   linux:
